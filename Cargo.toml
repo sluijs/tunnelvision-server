@@ -1,0 +1,22 @@
+[package]
+name = "tunnelvision-server"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+axum = { version = "0.6.12", features = ["headers", "ws"] }
+axum-extra = { version = "0.4.2", features = ["spa"] }
+clap = { version = "4.2.2", features = ["derive"] }
+futures = "0.3.28"
+futures-util = { version = "0.3.28", default-features = false, features = ["sink", "std"] }
+headers = "0.3.8"
+log = "0.4.17"
+tokio = { version = "1.27.0", features = ["full"] }
+tokio-tungstenite = "0.18.0"
+tower = "0.4.13"
+tower-http = { version = "0.4.0", features = ["full"] }
+tracing = "0.1.37"
+tracing-subscriber = { version = "0.3.16", features = ["env-filter"] }
