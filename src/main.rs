@@ -222,6 +222,8 @@ async fn handle_socket(socket: WebSocket, who: SocketAddr, state: Arc<AppState>)
                                         break;
                                     }
                                 }
+                            } else {
+                                println!("--- {} rejected binary message", who);
                             }
                         }
                     }

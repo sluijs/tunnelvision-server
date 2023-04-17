@@ -19,12 +19,12 @@ async def hello():
         arr = np.random.randint(0, 2048, (25, 1, 512, 512, 1), dtype=np.uint16)
 
         # Send the header first
-        h = uuid("seed").encode("utf-8")
+        h = uuid("seed")
         msg = json.dumps({"shape": arr.shape, "dtype": arr.dtype.name, "hash": h})
         await websocket.send(msg)
 
         # Send the array
-        await websocket.send(h + arr.tobytes())
+        await websocket.send(h.encode("utf-8") + arr.tobytes())
 
         # for chunk in np.array_split(arr, arr.shape[0], axis=0):
         #     print("Sending chunk...")
