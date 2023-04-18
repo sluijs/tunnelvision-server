@@ -63,7 +63,7 @@ struct AppState {
 
 impl Default for AppState {
     fn default() -> Self {
-        let (tx, _) = broadcast::channel(100);
+        let (tx, _) = broadcast::channel(1000);
         Self {
             clients: Arc::new(Mutex::new(HashMap::new())),
             tx,
@@ -198,7 +198,7 @@ async fn handle_socket(socket: WebSocket, who: SocketAddr, state: Arc<AppState>)
     // Spawn the first task that will receive broadcast messages and send text
     // messages over the websocket to our client.
     let s = state.clone();
-    let mut _send_task = tokio::spawn(async move {
+    let mut send_task = tokio::spawn(async move {
         while let Ok(msg) = rx.recv().await {
             // In any websocket error, break loop.
             match msg {
@@ -236,7 +236,7 @@ async fn handle_socket(socket: WebSocket, who: SocketAddr, state: Arc<AppState>)
 
     let s = state.clone();
     // Spawn a task that receives messages from the websocket and forwards them to the broadcast channel
-    let mut _recv_task = tokio::spawn(async move {
+    let mut recv_task = tokio::spawn(async move {
         while let Some(Ok(msg)) = receiver.next().await {
             match msg {
                 // Messages are forwarded to all clients, including the sender; also handles new connections
@@ -267,6 +267,16 @@ async fn handle_socket(socket: WebSocket, who: SocketAddr, state: Arc<AppState>)
                     } else {
                         println!(">>> {} somehow sent close message without CloseFrame", who);
                     }
+
+                    // Remove client from the list of clients
+                    println!("--- {} removed from client list", &who);
+                    s.clone().clients.lock().unwrap().retain(|_, v| v != &who);
+
+                    println!("--- updated client list: ");
+                    for (k, v) in s.clone().clients.lock().unwrap().iter() {
+                        println!("--- {} -> {}", k, v);
+                    }
+
                     return ControlFlow::Break(());
                 }
                 Message::Pong(v) => {
@@ -283,6 +293,13 @@ async fn handle_socket(socket: WebSocket, who: SocketAddr, state: Arc<AppState>)
 
         ControlFlow::Continue(())
     });
+
+
+    // If any one of the tasks run to completion, we abort the other.
+    tokio::select! {
+        _ = (&mut send_task) => recv_task.abort(),
+        _ = (&mut recv_task) => send_task.abort(),
+    };
 
 }
 
