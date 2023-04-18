@@ -1401,6 +1401,7 @@ dependencies = [
  "futures-util",
  "headers",
  "log",
+ "mime_guess",
  "serde",
  "serde_json",
  "tokio",

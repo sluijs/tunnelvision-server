@@ -22,10 +22,11 @@ use axum::body::{boxed, Body};
 use axum::extract::{State, TypedHeader};
 use axum::extract::connect_info::ConnectInfo;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
-use axum::http::{Response, StatusCode, Method};
+use axum::http::{Request, Response, StatusCode, Method};
 use axum::response::IntoResponse;
 use clap::Parser;
 use futures::{sink::SinkExt, stream::StreamExt};
+use mime_guess::from_path;
 use serde::{Deserialize, Serialize};
 use tokio::fs;
 use tokio::sync::broadcast;
@@ -97,12 +98,14 @@ async fn main() {
         .with_state(app_state)
 
         // Serve static files, such as the SPA
-        .fallback_service(get(|req| async move {
+        .fallback_service(get(|req: Request<Body>| async move {
+            let path = req.uri().path().to_owned();
             match ServeDir::new(&args.static_dir).oneshot(req).await {
                 Ok(res) => {
                     let status = res.status();
                     match status {
                         StatusCode::NOT_FOUND => {
+                            let mime = from_path(path).first_or_octet_stream();
                             let index_path = PathBuf::from(&args.static_dir).join("index.html");
                             let index_content = match fs::read_to_string(index_path).await {
                                 Err(_) => {
@@ -116,10 +119,13 @@ async fn main() {
 
                             Response::builder()
                                 .status(StatusCode::OK)
+                                .header("Content-Type", mime.as_ref())
                                 .body(boxed(Body::from(index_content)))
                                 .unwrap()
                         }
-                        _ => res.map(boxed),
+                        _ => {
+                            res.map(boxed)
+                        }
                     }
                 }
                 Err(err) => Response::builder()
