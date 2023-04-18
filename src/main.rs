@@ -22,7 +22,7 @@ use axum::body::{boxed, Body};
 use axum::extract::{State, TypedHeader};
 use axum::extract::connect_info::ConnectInfo;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
-use axum::http::{Response, StatusCode};
+use axum::http::{Response, StatusCode, Method};
 use axum::response::IntoResponse;
 use clap::Parser;
 use futures::{sink::SinkExt, stream::StreamExt};
@@ -31,6 +31,7 @@ use tokio::fs;
 use tokio::sync::broadcast;
 use tower::{ServiceExt};
 use tower_http::{
+    cors::{Any, CorsLayer},
     services::ServeDir,
     trace::{DefaultMakeSpan, TraceLayer},
 };
@@ -127,6 +128,13 @@ async fn main() {
                     .expect("error response"),
             }
         }))
+
+        // CORS
+        .layer(
+            CorsLayer::new()
+                .allow_origin(Any)
+                .allow_methods([Method::GET])
+        )
 
         // Logging so we can see whats going on
         .layer(
