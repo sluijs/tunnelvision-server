@@ -1401,6 +1401,8 @@ dependencies = [
  "futures-util",
  "headers",
  "log",
+ "serde",
+ "serde_json",
  "tokio",
  "tokio-tungstenite",
  "tower",

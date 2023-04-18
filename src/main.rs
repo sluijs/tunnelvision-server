@@ -13,7 +13,10 @@
 //! firefox http://localhost:8765/ws
 //! ```
 
+use std::sync::Mutex;
+use std::collections::HashMap;
 use std::{net::SocketAddr, ops::ControlFlow, path::PathBuf, sync::Arc};
+
 use axum::{Router, routing::get};
 use axum::body::{boxed, Body};
 use axum::extract::{State, TypedHeader};
@@ -21,11 +24,11 @@ use axum::extract::connect_info::ConnectInfo;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::http::{Response, StatusCode};
 use axum::response::IntoResponse;
-
 use clap::Parser;
 use futures::{sink::SinkExt, stream::StreamExt};
+use serde::{Deserialize, Serialize};
 use tokio::fs;
-use tokio::sync::{broadcast, broadcast::Sender};
+use tokio::sync::broadcast;
 use tower::{ServiceExt};
 use tower_http::{
     services::ServeDir,
@@ -40,13 +43,32 @@ struct Args {
     #[arg(short = 'p', long = "port", default_value = "8765")]
     port: u16,
 
-    #[arg(short = 'd', long = "dir", default_value = "./dist")]
+    #[arg(short = 'd', long = "static_dir", default_value = "./dist")]
     static_dir: String,
 }
 
-// Shared app state: a broadcast channel for sending messages to all clients
+#[derive(Debug, Deserialize, Serialize)]
+struct GUIClientHandshake {
+    connected: bool,
+    hash: String,
+}
+
 struct AppState {
-    tx: broadcast::Sender<Vec<u8>>,
+    // Store the address of all connected clients, with a hash that uniquely identifies the client
+    clients: Arc<Mutex<HashMap<String, SocketAddr>>>,
+
+    // Broadcast channel for sending messages to all clients
+    tx: broadcast::Sender<Message>,
+}
+
+impl Default for AppState {
+    fn default() -> Self {
+        let (tx, _) = broadcast::channel(1000);
+        Self {
+            clients: Arc::new(Mutex::new(HashMap::new())),
+            tx,
+        }
+    }
 }
 
 #[tokio::main]
@@ -64,10 +86,7 @@ async fn main() {
         .init();
 
     // Create the app state
-    // let clients = Mutex::new(HashSet::new());
-    let (tx, _) = broadcast::channel(10);
-
-    let app_state = Arc::new(AppState { tx });
+    let app_state = Arc::new(AppState::default());
 
     // build our application with some routes
     let app = Router::new()
@@ -118,10 +137,16 @@ async fn main() {
     // run it with hyper
     let addr = SocketAddr::from(([127, 0, 0, 1], args.port));
     tracing::debug!("--- listening on {}", addr);
-    axum::Server::bind(&addr)
-        .serve(app.into_make_service_with_connect_info::<SocketAddr>())
-        .await
-        .expect("Unable to start server");
+
+    let server = axum::Server::bind(&addr)
+        .serve(app.into_make_service_with_connect_info::<SocketAddr>());
+
+    println!("--- tunnelvision ---");
+
+    if let Err(err) = server.await {
+        tracing::error!("--- server error: {err}");
+    }
+
 }
 
 /// The handler for the HTTP request (this gets called when the HTTP GET lands at the start
@@ -142,6 +167,7 @@ async fn ws_handler(
     };
 
     println!("--- `{user_agent}` at {addr} connected.");
+
     // finalize the upgrade process by returning upgrade callback.
     // we can customize the callback by sending additional info such as address.
     let max_size = 256 * 1024 * 1024;
@@ -167,71 +193,117 @@ async fn handle_socket(socket: WebSocket, who: SocketAddr, state: Arc<AppState>)
     }
 
     // Subscribe to the broadcast channel
-    let mut rx = state.tx.subscribe();
+    let mut rx = state.clone().tx.subscribe();
 
     // Spawn the first task that will receive broadcast messages and send text
     // messages over the websocket to our client.
-    let mut _send_task = tokio::spawn(async move {
+    let s = state.clone();
+    let mut send_task = tokio::spawn(async move {
         while let Ok(msg) = rx.recv().await {
             // In any websocket error, break loop.
-            if sender.send(Message::Binary(msg)).await.is_err() {
-                break;
+            match msg {
+                // Forward text messages to all clients, including the origin
+                Message::Text(_) => {
+                    if sender.send(msg).await.is_err() {
+                        break;
+                    }
+                },
+
+                // Forward binary messages to a receiver with a matching hash
+                Message::Binary(d) => {
+                    if d.len() > 22 {
+                        let (hash, data) = d.split_at(22);
+                        if let Ok(hash) = String::from_utf8(hash.to_vec()) {
+                            let clients = s.clients.lock().unwrap().clone();
+                            if let Some(client) = clients.get(&hash) {
+                                if client == &who {
+                                    println!("--- {} accepted binary message", who);
+                                    if sender.send(Message::Binary(Vec::from(data))).await.is_err() {
+                                        break;
+                                    }
+                                }
+                            } else {
+                                println!("--- {} rejected binary message", who);
+                            }
+                        }
+                    }
+                },
+                _ => {}
             }
         }
     });
+
 
     let s = state.clone();
-    // Spawn a task that takes messages from the websocket, prepends the user
-    // name, and sends them to all broadcast subscribers.
-    let mut _recv_task = tokio::spawn(async move {
+    // Spawn a task that receives messages from the websocket and forwards them to the broadcast channel
+    let mut recv_task = tokio::spawn(async move {
         while let Some(Ok(msg)) = receiver.next().await {
-            // print message and break if instructed to do so
-            if process_message(msg, who, s.tx.clone()).is_break() {
-                break;
+            match msg {
+                // Messages are forwarded to all clients, including the sender; also handles new connections
+                Message::Text(t) => {
+                    println!(">>> {} sent str: {:?}", who, t);
+                    if let Ok(client) = serde_json::from_str::<GUIClientHandshake>(&t) {
+                        // Add client to the list of clients
+                        println!("--- {} added to client list", who);
+                        s.clone().clients.lock().unwrap().insert(client.hash, who);
+                    }
+
+                    // // Forward the message to _all_ clients
+                    s.tx.send(Message::Text(t)).expect("Could not send message to broadcast channel");
+                }
+
+                Message::Binary(d) => {
+                    // Forward the message to all clients
+                    println!(">>> {} sent {} bytes", who, d.len());
+                    s.tx.send(Message::Binary(d)).expect("Could not send message to broadcast channel");
+                }
+
+                Message::Close(c) => {
+                    if let Some(cf) = c {
+                        println!(
+                            ">>> {} sent close with code {} and reason `{}`",
+                            who, cf.code, cf.reason
+                        );
+                    } else {
+                        println!(">>> {} somehow sent close message without CloseFrame", who);
+                    }
+
+                    // Remove client from the list of clients
+                    println!("--- {} removed from client list", &who);
+                    s.clone().clients.lock().unwrap().retain(|_, v| v != &who);
+
+                    println!("--- updated client list: ");
+                    for (k, v) in s.clone().clients.lock().unwrap().iter() {
+                        println!("--- {} -> {}", k, v);
+                    }
+
+                    return ControlFlow::Break(());
+                }
+                Message::Pong(v) => {
+                    println!(">>> {} sent pong with {:?}", who, v);
+                }
+                // You should never need to manually handle Message::Ping, as axum's websocket library
+                // will do so for you automagically by replying with Pong and copying the v according to
+                // spec. But if you need the contents of the pings you can see them here.
+                Message::Ping(v) => {
+                    println!(">>> {} sent ping with {:?}", who, v);
+                }
             }
         }
+
+        ControlFlow::Continue(())
     });
 
+
+    // If any one of the tasks run to completion, we abort the other.
+    tokio::select! {
+        _ = (&mut send_task) => recv_task.abort(),
+        _ = (&mut recv_task) => send_task.abort(),
+    };
+
 }
 
-/// helper to print contents of messages to stdout. Has special treatment for Close.
-fn process_message(msg: Message, who: SocketAddr, tx: Sender<Vec<u8>>) -> ControlFlow<(), ()> {
-    match msg {
-        Message::Text(t) => {
-            // tx.send(format!("{:?}: {}", who, t))
-            //     .expect("Could not send message to broadcast channel");
-
-            println!(">>> {} sent str: {:?}", who, t);
-        }
-        Message::Binary(d) => {
-            println!(">>> {} sent {} bytes", who, d.len());
-            tx.send(d).expect("Could not send message to broadcast channel");
-        }
-
-        Message::Close(c) => {
-            if let Some(cf) = c {
-                println!(
-                    ">>> {} sent close with code {} and reason `{}`",
-                    who, cf.code, cf.reason
-                );
-            } else {
-                println!(">>> {} somehow sent close message without CloseFrame", who);
-            }
-            return ControlFlow::Break(());
-        }
-        Message::Pong(v) => {
-            println!(">>> {} sent pong with {:?}", who, v);
-        }
-        // You should never need to manually handle Message::Ping, as axum's websocket library
-        // will do so for you automagically by replying with Pong and copying the v according to
-        // spec. But if you need the contents of the pings you can see them here.
-        Message::Ping(v) => {
-            println!(">>> {} sent ping with {:?}", who, v);
-        }
-    }
-    ControlFlow::Continue(())
-}
-
+// Simple handler to ping the server
 async fn hello() -> impl IntoResponse {
     "Hello, Client!"
 }
