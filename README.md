@@ -14,3 +14,11 @@ cargo build --release
 # Copy the executable to the tunnelvision package
 cp ./target/release/tunnelvision-server ../tunnelvision/tunnelvision/bin
 ```
+
+## VS Code Remote
+To use tunnelvision through VS Code remote, we need forward an arbitrary available port to the tunnelvision-server. Once you have forwarded a port from the `ports` pane within VS Code, make sure to add it to your configuration file for tunnelvision:
+
+```yaml
+# ~/.cache/tunnelvision/default_config.yaml
+port: 1337
+```
