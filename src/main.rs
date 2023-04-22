@@ -44,7 +44,7 @@ struct Args {
     #[arg(short = 'p', long = "port", default_value = "8765")]
     port: u16,
 
-    #[arg(short = 'd', long = "static_dir", default_value = "./dist")]
+    #[arg(short = 'd', long = "dist", default_value = "./dist")]
     static_dir: String,
 }
 
@@ -225,10 +225,11 @@ async fn handle_socket(socket: WebSocket, who: SocketAddr, state: Arc<AppState>)
                             let clients = s.clients.lock().unwrap().clone();
                             if let Some(client) = clients.get(&hash) {
                                 if client == &who {
-                                    println!("--- {} accepted binary message", who);
                                     if sender.send(Message::Binary(Vec::from(data))).await.is_err() {
+                                        println!("--- {} unexpectedly rejected binary message", who);
                                         break;
                                     }
+                                    println!("--- {} accepted binary message", who);
                                 }
                             } else {
                                 println!("--- {} rejected binary message", who);
