@@ -225,6 +225,7 @@ async fn handle_socket(socket: WebSocket, who: SocketAddr, state: Arc<AppState>)
 
                 // Forward binary messages to a receiver with a matching hash
                 Message::Binary(d) => {
+                    println!("--- trying to forward binary to {}", who);
                     if d.len() > 22 {
                         let (hash, data) = d.split_at(22);
                         if let Ok(hash) = String::from_utf8(hash.to_vec()) {
