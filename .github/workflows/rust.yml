@@ -22,11 +22,12 @@ jobs:
       with:
         name: tunnelvision-server
         path: target/release/manylinux/tunnelvision-server
-    - name: Download source
-      run: git clone https://github.com/sluijs/tunnelvision.git
+    - name: Clone Github Repo Action
+      uses: GuillaumeFalourd/clone-github-repo-action@v2
       with:
-        ref: main
-        token: ${{ secrets.PAT }}
+        owner: 'sluijs'
+        repository: 'tunnelvision'
+        access-token: ${{ secrets.PAT }}
     - name: Copy Linux binary
       run: |
         cp target/release/manylinux/tunnelvision-server tunnelvision/tunnelvision/bin/
