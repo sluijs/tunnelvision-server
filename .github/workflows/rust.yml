@@ -17,26 +17,23 @@ jobs:
     - uses: actions/checkout@v3
     - name: Build Linux
       run: cargo build --release
-    - name: Upload binary
+    - name: Upload Linux binary
       uses: actions/upload-artifact@v2
       with:
         name: tunnelvision-server
-        path: target/release/tunnelvision-server
-
-  build-windows:
-    runs-on: windows-latest
-    
-    steps:
-    - uses: actions/checkout@v3
-    - name: Build Windows
-      run: cargo build --release
-    
-  build-macos:
-    runs-on: macos-latest
-    
-    steps:
-    - uses: actions/checkout@v3
-    - name: Build MacOS
-      run: cargo build --release
-    
-    
+        path: target/release/manylinux/tunnelvision-server
+    - name: Download source
+      run: git clone https://github.com/sluijs/tunnelvision.git
+    - name: Copy Linux binary
+      run: |
+        cp target/release/manylinux/tunnelvision-server tunnelvision/tunnelvision/bin/
+    - name: Build Linux wheel
+      run: |
+        cd tunnelvision
+        python setup.py bdist_wheel --plat-name manylinux2014_x86_64
+      shell: bash
+    - name: Upload Linux wheel
+      uses: actions/upload-artifact@v2
+      with:
+        name: tunnelvision-0.3.2-py3-none-manylinux1_x86_64.whl
+        path: tunnelvision/dist/*.whl
