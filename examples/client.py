@@ -27,8 +27,8 @@ async def hello(host: str, port: int, hash: str = "dev"):
         #     await websocket.send(chunk.tobytes())
 
         # await websocket.send(arr.tobytes())
-        # greeting = await websocket.recv()
-        # print(f"<<< {greeting}")
+        greeting = await websocket.recv()
+        print(f"<<< {greeting}")
 
         await websocket.close(reason="Goodbye!")
 
@@ -40,4 +40,4 @@ if __name__ == "__main__":
     parser.add_argument("--hash", type=str, default="dev")
     args = parser.parse_args()
 
-    asyncio.run(asyncio.wait_for(hello(args.host, args.port, args.hash), timeout=5))
+    asyncio.run(asyncio.wait_for(hello(args.host, args.port, args.hash), timeout=15))
