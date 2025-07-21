@@ -22,3 +22,6 @@ To use tunnelvision through VS Code remote, we need forward an arbitrary availab
 # ~/.cache/tunnelvision/default_config.yaml
 port: 1337
 ```
+
+## Debug
+The `stdout` and `stderr` are logged in `~/.cache/tunnelvision/server.out`.
